@@ -1,6 +1,6 @@
 pub const COLS: usize = 64;
 pub const ROWS: usize = 32;
-pub const SCALE: usize = 20;
+pub const SCALE: usize = 15;
 
 #[derive(Clone)]
 pub struct Monitor {

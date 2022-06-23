@@ -1,13 +1,14 @@
 pub struct Keyboard {
-    pressed_key: Option<Chip8Key>,
+    pub pressed_key: Option<Chip8Key>,
 }
 
 impl Keyboard {
     pub fn new() -> Self {
         Keyboard { pressed_key: None }
     }
+
     pub fn check_key(&mut self) -> Option<Chip8Key> {
-        println!("Checking key, got: {:?}", self.pressed_key);
+        //println!("Checking key, got: {:?}", self.pressed_key);
         match &self.pressed_key {
             Some(key) => {
                 let pressed_key = *key;
@@ -23,7 +24,7 @@ impl Keyboard {
         } else {
             self.pressed_key = None;
         }
-        println!("Pressing  key {:?}", self.pressed_key);
+        //println!("Pressing  key {:?}", self.pressed_key);
     }
 }
 

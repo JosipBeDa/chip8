@@ -2,7 +2,7 @@ use crate::keyboard::*;
 use crate::monitor::Monitor;
 use rand::*;
 
-const SPEED: u8 = 10;
+const SPEED: u8 = 5;
 const MEMORY_SIZE: usize = 4096;
 const NUM_REGISTERS: usize = 16;
 const SPRITES: [u8; 80] = [
@@ -54,10 +54,22 @@ impl Chip8 {
             keyboard: Keyboard::new(),
         }
     }
+
+    pub fn get_metrics(&self) -> String {
+        format!(
+            "PC:{} I:{} SP:{} DT:{} ST:{} Key:{:?}",
+            self.pc,
+            self.index,
+            self.stack_pointer,
+            self.delay_timer,
+            self.sound_timer,
+            self.keyboard.pressed_key
+        )
+    }
+
     pub fn load_sprites(&mut self) {
         for (i, sprite_byte) in SPRITES.iter().enumerate() {
             self.memory[i] = *sprite_byte;
-            println!("Set memory location {:#4x} to {}", i, self.memory[i]);
         }
     }
 
@@ -96,11 +108,7 @@ impl Chip8 {
     #[allow(dead_code)]
     pub fn debug_cycle(&mut self) {
         for _ in 0..self.speed {
-            // Shift from the current location in memory 8 bits to the left,
-            // e.g. 0xFF << 8 = 0xFF00
             let shifted: u16 = (self.memory[self.pc as usize] as u16) << 8;
-            // Or it with the next instruction
-            // e.g. 0xFF00 | 0x12 = 0xFF12
             let opcode: u16 = shifted | self.memory[self.pc as usize + 1] as u16;
             self.debug_instruction(opcode);
             self.update_timers();
@@ -112,173 +120,93 @@ impl Chip8 {
         let x = ((instruction & 0x0F00) >> 8) as usize;
         let y = ((instruction & 0x00F0) >> 4) as usize;
         match instruction & 0xF000 {
-            0x0000 => {
-                match instruction {
-                    // Clear display
-                    0x00E0 => {
-                        self.monitor.clear();
-                    }
-                    // Return from subroutine
-                    // The interpreter sets the program counter to the address at the top of the stack, then subtracts 1 from the stack pointer.
-                    0x00EE => {
-                        self.pc = self.stack[self.stack_pointer as usize];
-                        self.stack_pointer -= 1;
-                    }
-                    _ => {}
+            0x0000 => match instruction {
+                0x00E0 => {
+                    self.monitor.clear();
                 }
-            }
+                0x00EE => {
+                    self.pc = self.stack[self.stack_pointer as usize];
+                    self.stack_pointer -= 1;
+                }
+                _ => {}
+            },
             0x1000 => {
-                // Jump to location nnn
-                // The interpreter sets the program counter to nnn.
                 self.pc = instruction & 0xFFF;
             }
             0x2000 => {
-                // 2nnn - CALL addr
-                // Call subroutine at nnn.
-                // The interpreter increments the stack pointer, then puts the current PC on the top of the stack. The PC is then set to nnn.
                 self.stack_pointer += 1;
                 self.stack[self.stack_pointer as usize] = self.pc;
                 self.pc = instruction & 0xFFF;
             }
             0x3000 => {
-                // 3xkk - SE Vx, byte
-                // Skip next instruction if Vx = kk.
-                // The interpreter compares register Vx to kk, and if they are equal, increments the program counter by 2.
                 if self.registers[x] == instruction as u8 {
                     self.pc += 2;
                 }
             }
             0x4000 => {
-                // 4xkk - SNE Vx, byte
-                // Skip next instruction if Vx != kk.
-                // The interpreter compares register Vx to kk, and if they are not equal, increments the program counter by 2.
                 if self.registers[x] != instruction as u8 {
                     self.pc += 2;
                 }
             }
             0x5000 => {
-                // 5xy0 - SE Vx, Vy
-                // Skip next instruction if Vx = Vy.
-                // The interpreter compares register Vx to register Vy, and if they are equal, increments the program counter by 2.
                 if self.registers[x] == self.registers[y] {
                     self.pc += 2;
                 }
             }
             0x6000 => {
-                // 6xkk - LD Vx, byte
-                // Set Vx = kk.
-                // The interpreter puts the value kk into register Vx.
                 self.registers[x] = instruction as u8;
-                // println!("Register {} set to {}", x, instruction & 0xFF)
             }
             0x7000 => {
-                // 7xkk - ADD Vx, byte
-                // Set Vx = Vx + kk.
-                // Adds the value kk to the value of register Vx, then stores the result in Vx.
                 self.registers[x] = (self.registers[x] as u16 + (instruction & 0xFF)) as u8;
             }
             0x8000 => match instruction & 0xF {
-                // 8xy0 - LD Vx, Vy
-                // Set Vx = Vy.
-                // Stores the value of register Vy in register Vx.
                 0x0 => self.registers[x] = self.registers[y],
-
-                // 8xy1 - OR Vx, Vy
-                // Set Vx = Vx OR Vy.
-                // Performs a bitwise OR on the values of Vx and Vy, then stores the result in Vx.
                 0x1 => self.registers[x] |= self.registers[y],
-
-                // 8xy2 - AND Vx, Vy
-                // Set Vx = Vx AND Vy.
-                // Performs a bitwise AND on the values of Vx and Vy, then stores the result in Vx.
                 0x2 => self.registers[x] &= self.registers[y],
-
-                // 8xy3 - XOR Vx, Vy
-                // Set Vx = Vx XOR Vy.
-                // Performs a bitwise exclusive OR on the values of Vx and Vy, then stores the result in Vx.
                 0x3 => self.registers[x] ^= self.registers[y],
-
-                // 8xy4 - ADD Vx, Vy
-                // Set Vx = Vx + Vy, set VF = carry.
-                // The values of Vx and Vy are added together. If the result is greater than 8 bits (i.e., > 255,) VF is set to 1, otherwise 0.
-                // Only the lowest 8 bits of the result are kept, and stored in Vx.
                 0x4 => {
                     self.registers[0xF] =
                         (self.registers[x] as u16 + self.registers[y] as u16 > 255) as u8;
                     self.registers[x] = (self.registers[x] as u16 + self.registers[y] as u16) as u8;
                 }
-
-                // 8xy5 - SUB Vx, Vy
-                // Set Vx = Vx - Vy, set VF = NOT borrow.
-                // If Vx > Vy, then VF is set to 1, otherwise 0. Then Vy is subtracted from Vx, and the results stored in Vx.
                 0x5 => {
                     self.registers[0xF] = (self.registers[x] > self.registers[y]) as u8;
                     self.registers[x] = (self.registers[x] as i16 - self.registers[y] as i16) as u8;
                 }
-
-                // 8xy6 - SHR Vx {, Vy}
-                // Set Vx = Vx SHR 1.
-                // If the least-significant bit of Vx prior to the shift is 1, VF is set to 1, otherwise 0
                 0x6 => {
-                    //self.registers[x] = self.registers[y];
                     self.registers[0xF] = self.registers[x] & 1;
-                    self.registers[x] >>= 1;
+                    self.registers[x] = self.registers[y] >> 1;
                 }
-
-                // 8xy7 - SUBN Vx, Vy
-                // Set Vx = Vy - Vx, set VF = NOT borrow.
-                // If Vy > Vx, then VF is set to 1, otherwise 0. Then Vx is subtracted from Vy, and the results stored in Vx.
                 0x7 => {
                     self.registers[0xF] = (self.registers[x] < self.registers[y]) as u8;
                     self.registers[x] = (self.registers[y] as i16 - self.registers[x] as i16) as u8;
                 }
-
-                // 8xyE - SHL Vx {, Vy}
-                // Set Vx = Vx SHL 1.
-                // If the most-significant bit of Vx prior to the shift is 1, VF is set to 1, otherwise to 0.
                 0xE => {
-                    //self.registers[x] = self.registers[y];
                     self.registers[0xF] = self.registers[x] & 0x80;
-                    self.registers[x] <<= 1;
+                    self.registers[x] = self.registers[y] << 1;
                 }
                 _ => {}
             },
             0x9000 => {
-                // 9xy0 - SNE Vx, Vy
-                // Skip next instruction if Vx != Vy.
-                // The values of Vx and Vy are compared, and if they are not equal, the program counter is increased by 2.
                 if self.registers[x] != self.registers[y] {
                     self.pc += 2;
                 }
             }
             0xA000 => {
-                // Annn - LD I, addr
-                // Set I = nnn.
-                // The value of register I is set to nnn.
                 self.index = instruction & 0xFFF;
             }
             0xB000 => {
-                // Bnnn - JP V0, addr
-                // Jump to location nnn + V0.
-                // The program counter is set to nnn plus the value of V0.
                 self.pc += (instruction & 0xFFF) + self.registers[0] as u16;
             }
             0xC000 => {
-                // Cxkk - RND Vx, byte
-                // Set Vx = random byte AND kk.
-                // The interpreter generates a random number from 0 to 255, which is then ANDed with the value kk. The results are stored in Vx
                 let rnd: u8 = thread_rng().gen_range(0..=255);
                 self.registers[x] = rnd & instruction as u8;
             }
             0xD000 => {
-                // Dxyn - DRW Vx, Vy, nibble
-                // Display n-byte sprite starting at memory location I at (Vx, Vy), set VF = collision.
-                // Draw a sprite at position VX, VY with N bytes of sprite data starting at the address stored in I
-                // Set VF to 01 if any set pixels are changed to unset, and 00 otherwise
-
+                // Set carry flag to 0
+                self.registers[0xF] = 0;
                 // Fetch the y coordinate
                 let mut c_y = self.registers[y] % 32;
-                self.registers[0xF] = 0;
                 // The last nibble (n) will dictate how much bytes we read from the memory
                 let n = instruction & 0xF;
                 // Iterate through n bytes of memory
@@ -291,7 +219,7 @@ impl Chip8 {
                     for _ in 0..8 {
                         // If the MSB of the sprite byte is 1 we set/unset the pixel and toggle the flag accordingly
                         if (sprite_byte & 0x80) > 0 {
-                            // And if the pixel is togled to 1
+                            // And if the pixel is togled to 1, set carry to 1
                             self.registers[0xF] =
                                 self.monitor.toggle_pixel(c_x as usize, c_y as usize) as u8;
                         }
@@ -311,7 +239,6 @@ impl Chip8 {
             0xE000 => match instruction & 0xFF {
                 0x9E => {
                     if let Some(key) = self.keyboard.check_key() {
-                        println!("key: {:?}", key);
                         if self.registers[x] == key as u8 {
                             self.pc += 2;
                         }
@@ -319,7 +246,6 @@ impl Chip8 {
                 }
                 0xA1 => {
                     if let Some(key) = self.keyboard.check_key() {
-                        println!("key: {:?}", key);
                         if self.registers[x] != key as u8 {
                             self.pc += 2;
                         }
@@ -328,49 +254,28 @@ impl Chip8 {
                 _ => {}
             },
             0xF000 => match instruction & 0xFF {
-                // Fx07 - LD Vx, DT
-                // Set Vx = delay timer value.
-                // The value of DT is placed into Vx.
                 0x07 => self.registers[x] = self.delay_timer,
-
-                // Fx0A - LD Vx, K
-                // Wait for a key press, store the value of the key in Vx.
-                // All execution stops until a key is pressed, then the value of that key is stored in Vx.
                 0x0A => {
                     match self.keyboard.check_key() {
                         Some(key) => {
                             self.registers[x] = key as u8;
-                            println!("key: {:?}", key);
                         }
                         None => {
                             self.pc -= 2;
                         }
                     };
                 }
-
-                // Fx15 - LD DT, Vx
-                // Set delay timer = Vx.
-                // DT is set equal to the value of Vx.
                 0x15 => self.delay_timer = self.registers[x],
-
-                // Fx18 - LD ST, Vx
-                // Set sound timer = Vx.
-                // ST is set equal to the value of Vx.
                 0x18 => self.sound_timer = self.registers[x],
-
-                // Fx1E - ADD I, Vx
-                // Set I = I + Vx.
-                // The values of I and Vx are added, and the results are stored in I.
                 0x1E => self.index += self.registers[x] as u16,
-
-                // Fx29 - LD F, Vx
-                // Set I = location of sprite for digit Vx.
-                // The value of I is set to the location for the hexadecimal sprite corresponding to the value of Vx.
-                0x29 => self.index = self.memory[self.registers[x] as usize] as u16,
-
-                // Fx33 - LD B, Vx
-                // Store BCD representation of Vx in memory locations I, I+1, and I+2.
-                // The interpreter takes the decimal value of Vx, and places the hundreds digit in memory at location in I, the tens digit at location I+1, and the ones digit at location I+2.
+                0x29 => {
+                    for i in 0..16 {
+                        if self.registers[x] == i {
+                            self.index = (i as usize * 5) as u16;
+                            break;
+                        }
+                    }
+                }
                 0x33 => {
                     let mut digit = self.registers[x];
                     for i in 0..3 {
@@ -379,20 +284,12 @@ impl Chip8 {
                         digit /= 10;
                     }
                 }
-
-                // Fx55 - LD [I], Vx
-                // Store registers V0 through Vx in memory starting at location I.
-                // The interpreter copies the values of registers V0 through Vx into memory, starting at the address in I.
                 0x55 => {
                     for i in 0..=x {
                         self.memory[self.index as usize + i] = self.registers[i];
                     }
                     // self.index += 1 + x as u16;
                 }
-
-                // Fx65 - LD Vx, [I]
-                // Read registers V0 through Vx from memory starting at location I.
-                // The interpreter reads values from memory starting at location I into registers V0 through Vx.
                 0x65 => {
                     for i in 0..=x {
                         self.registers[i] = self.memory[self.index as usize + i];
@@ -407,101 +304,101 @@ impl Chip8 {
 
     pub fn debug_instruction(&mut self, instruction: u16) {
         println!("Interpreting instruction: {:#04x}", instruction);
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        //std::thread::sleep(std::time::Duration::from_millis(500));
         self.pc += 2;
         let x = ((instruction & 0x0F00) >> 8) as usize;
         let y = ((instruction & 0x00F0) >> 4) as usize;
         match instruction & 0xF000 {
             0x0000 => match instruction {
                 0x00E0 => {
-                    println!("Clearing display");
+                    println!("00E0 -- Clearing display");
                     self.monitor.clear();
                 }
                 0x00EE => {
                     self.pc = self.stack[self.stack_pointer as usize];
-                    println!("PC set to {:#4x}", self.pc);
+                    println!("00EE -- PC set to {:#4x}", self.pc);
                     self.stack_pointer -= 1;
-                    println!("Stack pointer set to {}", self.stack_pointer);
+                    println!("00EE -- Stack pointer set to {}", self.stack_pointer);
                 }
                 _ => {}
             },
             0x1000 => {
                 self.pc = instruction & 0xFFF;
-                println!("PC set to {:#4x}", self.pc);
+                println!("1NNN -- PC set to {:#4x}", self.pc);
             }
             0x2000 => {
                 self.stack_pointer += 1;
-                println!("Stack pointer set to {}", self.stack_pointer);
+                println!("2NNN -- Stack pointer set to {}", self.stack_pointer);
                 self.stack[self.stack_pointer as usize] = self.pc;
-                println!("Stack set to {:?}", self.stack);
+                println!("2NNN -- Stack set to {:?}", self.stack);
                 self.pc = instruction & 0xFFF;
-                println!("PC set to {:#4x}", self.pc);
+                println!("2NNN -- PC set to {:#4x}", self.pc);
             }
             0x3000 => {
                 if self.registers[x] == instruction as u8 {
                     self.pc += 2;
-                    println!("PC set to {:#4x}", self.pc);
+                    println!("3XNN -- PC set to {:#4x}", self.pc);
                 }
             }
             0x4000 => {
                 if self.registers[x] != instruction as u8 {
                     self.pc += 2;
-                    println!("PC set to {:#4x}", self.pc);
+                    println!("4XNN -- PC set to {:#4x}", self.pc);
                 }
             }
             0x5000 => {
                 if self.registers[x] == self.registers[y] {
                     self.pc += 2;
-                    println!("PC set to {:#4x}", self.pc);
+                    println!("5XY0 -- PC set to {:#4x}", self.pc);
                 }
             }
             0x6000 => {
                 self.registers[x] = instruction as u8;
-                println!("Register {} set to {:#4x}", x, instruction as u8);
+                println!("6XNN -- Register {} set to {:#4x}", x, instruction as u8);
             }
             0x7000 => {
                 self.registers[x] = (self.registers[x] as u16 + (instruction & 0xFF)) as u8;
-                println!("Register {} set to {:#4x}", x, self.registers[x]);
+                println!("7XNN -- Register {} set to {:#4x}", x, self.registers[x]);
             }
             0x8000 => match instruction & 0xF {
                 0x0 => {
                     self.registers[x] = self.registers[y];
-                    println!("Register {} set to {:#4x}", x, self.registers[x]);
+                    println!("8XY0 -- Register {} set to {:#4x}", x, self.registers[x]);
                 }
                 0x1 => {
                     self.registers[x] |= self.registers[y];
-                    println!("Register {} set to {:#4x}", x, self.registers[x]);
+                    println!("8XY1 -- Register {} set to {:#4x}", x, self.registers[x]);
                 }
                 0x2 => {
                     self.registers[x] &= self.registers[y];
-                    println!("Register {} set to {:#4x}", x, self.registers[x]);
+                    println!("8XY2 -- Register {} set to {:#4x}", x, self.registers[x]);
                 }
                 0x3 => {
                     self.registers[x] ^= self.registers[y];
-                    println!("Register {} set to {:#4x}", x, self.registers[x]);
+                    println!("8XY3 -- Register {} set to {:#4x}", x, self.registers[x]);
                 }
 
                 0x4 => {
                     self.registers[0xF] =
                         (self.registers[x] as u16 + self.registers[y] as u16 > 255) as u8;
-                    println!("Carry set to {}", self.registers[0xF]);
+                    println!("8XY4 -- Carry set to {}", self.registers[0xF]);
                     self.registers[x] = (self.registers[x] as u16 + self.registers[y] as u16) as u8;
-                    println!("Register {} set to {}", x, self.registers[x]);
+                    println!("8XY4 -- Register {} set to {}", x, self.registers[x]);
                 }
 
                 0x5 => {
                     self.registers[0xF] = (self.registers[x] > self.registers[y]) as u8;
-                    println!("Carry set to {}", self.registers[0xF]);
+                    println!("8XY5 -- Carry set to {}", self.registers[0xF]);
                     self.registers[x] = (self.registers[x] as i16 - self.registers[y] as i16) as u8;
-                    println!("Register {} set to {}", x, self.registers[x]);
+                    println!("8XY5 -- Register {} set to {}", x, self.registers[x]);
                 }
 
                 0x6 => {
                     //self.registers[x] = self.registers[y];
                     self.registers[0xF] = self.registers[x] & 1;
-                    println!("Carry set to {}", self.registers[0xF]);
+                    println!("8XY6 -- Carry set to {}", self.registers[0xF]);
                     self.registers[x] >>= 1;
-                    println!("Register {} set to {}", x, self.registers[x]);
+                    println!("8XY6 -- Register {} set to {}", x, self.registers[x]);
                 }
 
                 0x7 => {
@@ -510,40 +407,40 @@ impl Chip8 {
                     } else {
                         self.registers[0xF] = 0;
                     }
-                    println!("Carry set to {}", self.registers[0xF]);
+                    println!("8XY7 -- Carry set to {}", self.registers[0xF]);
                     self.registers[x] = match self.registers[y].checked_sub(self.registers[x]) {
                         Some(val) => val,
                         None => 0,
                     };
-                    println!("Register {} set to {}", x, self.registers[x]);
+                    println!("8XY7 -- Register {} set to {}", x, self.registers[x]);
                 }
 
                 0xE => {
                     //self.registers[x] = self.registers[y];
                     self.registers[0xF] = self.registers[x] & 0x80;
                     self.registers[x] <<= 1;
-                    println!("Register {} set to {}", x, self.registers[x]);
+                    println!("8XYE -- Register {} set to {}", x, self.registers[x]);
                 }
                 _ => {}
             },
             0x9000 => {
                 if self.registers[x] != self.registers[y] {
                     self.pc += 2;
-                    println!("PC set to {:#4x}", self.pc);
+                    println!("9XY0 -- PC set to {:#4x}", self.pc);
                 }
             }
             0xA000 => {
                 self.index = instruction & 0xFFF;
-                println!("Index set to {}", self.index);
+                println!("ANNN -- Index set to {}", self.index);
             }
             0xB000 => {
                 self.pc += (instruction & 0xFFF) + self.registers[0] as u16;
-                println!("PC set to {:#4x}", self.pc);
+                println!("BNNN -- PC set to {:#4x}", self.pc);
             }
             0xC000 => {
                 let rnd: u8 = thread_rng().gen_range(0..=255);
                 self.registers[x] = rnd & instruction as u8;
-                println!("Register {} set to {}", x, self.registers[x]);
+                println!("CXKK -- Register {} set to {}", x, self.registers[x]);
             }
             0xD000 => {
                 let mut c_y = self.registers[y] % 32;
@@ -571,22 +468,22 @@ impl Chip8 {
             }
             0xE000 => match instruction & 0xFF {
                 0x9E => {
-                    println!("0xEX9E checking for key");
+                    println!("0xEX9E -- checking for key");
                     if let Some(key) = self.keyboard.check_key() {
-                        println!("Got key {:?}", key);
+                        println!("EX9E -- Got key {:?}", key);
                         if self.registers[x] == key as u8 {
                             self.pc += 2;
-                            println!("PC set to {:#4x}", self.pc);
+                            println!("EX9E -- PC set to {:#4x}", self.pc);
                         }
                     }
                 }
                 0xA1 => {
-                    println!("0xEXA! checking for key");
+                    println!("EXA1 -- checking for key");
                     if let Some(key) = self.keyboard.check_key() {
-                        println!("Got key {:?}", key);
+                        println!("EXA1 -- Got key {:?}", key);
                         if self.registers[x] != key as u8 {
                             self.pc += 2;
-                            println!("PC set to {:#4x}", self.pc);
+                            println!("EXA1 -- PC set to {:#4x}", self.pc);
                         }
                     }
                 }
@@ -595,15 +492,15 @@ impl Chip8 {
             0xF000 => match instruction & 0xFF {
                 0x07 => {
                     self.registers[x] = self.delay_timer;
-                    println!("Register {} set to {}", x, self.registers[x]);
+                    println!("FX07 -- Register {} set to {}", x, self.registers[x]);
                 }
 
                 0x0A => {
                     match self.keyboard.check_key() {
                         Some(key) => {
-                            println!("Got key {:?}", key);
+                            println!("FX0A -- Got key {:?}", key);
                             self.registers[x] = key as u8;
-                            println!("Register {} set to {}", x, self.registers[x]);
+                            println!("FX0A -- Register {} set to {}", x, self.registers[x]);
                         }
                         None => {
                             self.pc -= 2;
@@ -613,21 +510,26 @@ impl Chip8 {
 
                 0x15 => {
                     self.delay_timer = self.registers[x];
-                    println!("Delay timer set to {}", self.delay_timer);
+                    println!("FX15 -- Delay timer set to {}", self.delay_timer);
                 }
                 0x18 => {
                     self.sound_timer = self.registers[x];
-                    println!("Sound timer set to {}", self.delay_timer);
+                    println!("FX18 -- Sound timer set to {}", self.delay_timer);
                 }
 
                 0x1E => {
                     self.index += self.registers[x] as u16;
-                    println!("Index set to {}", self.index);
+                    println!("FX1E -- Index set to {}", self.index);
                 }
 
                 0x29 => {
-                    self.index = self.registers[x] as u16;
-                    println!("Index set to {}", self.index);
+                    for i in 0..16 {
+                        if self.registers[x] == i {
+                            self.index = (i as usize * 5) as u16;
+                            println!("FX29 -- Index set to {}", self.index);
+                            break;
+                        }
+                    }
                 }
 
                 0x33 => {
@@ -637,7 +539,7 @@ impl Chip8 {
                         self.memory[(self.index + 2 - i) as usize] = m % 10;
                         digit /= 10;
                         println!(
-                            "Memory location {} set to {}",
+                            "FX33 -- Memory location {} set to {}",
                             self.index + 2 - i,
                             self.memory[(self.index + 2 - i) as usize]
                         );
@@ -654,6 +556,7 @@ impl Chip8 {
                 0x65 => {
                     for i in 0..=x {
                         self.registers[i] = self.memory[self.index as usize + i];
+                        println!("FX65 -- Register {} set to {}", i, self.registers[i]);
                     }
                     // self.index += 1 + x as u16;
                 }
