@@ -1,8 +1,11 @@
 use crate::keyboard::*;
 use crate::monitor::Monitor;
 use rand::*;
+use sdl2::event::Event::KeyDown;
+use sdl2::keyboard::Keycode;
+use sdl2::EventPump;
 
-const SPEED: u8 = 5;
+const SPEED: u8 = 10;
 const MEMORY_SIZE: usize = 4096;
 const NUM_REGISTERS: usize = 16;
 const SPRITES: [u8; 80] = [
@@ -36,6 +39,7 @@ pub struct Chip8 {
     delay_timer: u8,
     sound_timer: u8,
     speed: u8,
+    pub kill_flag: bool,
 }
 
 impl Chip8 {
@@ -52,6 +56,7 @@ impl Chip8 {
             sound_timer: 0,
             speed: SPEED,
             keyboard: Keyboard::new(),
+            kill_flag: false,
         }
     }
 
@@ -92,8 +97,9 @@ impl Chip8 {
         self.sound_timer > 0
     }
 
-    pub fn cycle(&mut self) {
+    pub fn cycle(&mut self, event_pump: &mut EventPump) {
         for _ in 0..self.speed {
+            self.check_input(event_pump);
             // Shift from the current location in memory 8 bits to the left,
             // e.g. 0xFF << 8 = 0xFF00
             let shifted: u16 = (self.memory[self.pc as usize] as u16) << 8;
@@ -102,6 +108,118 @@ impl Chip8 {
             let opcode: u16 = shifted | self.memory[self.pc as usize + 1] as u16;
             self.interpret_instruction(opcode);
             self.update_timers();
+        }
+        //self.keyboard.press_key(None);
+    }
+
+    pub fn check_input(&mut self, event_pump: &mut EventPump) {
+        for event in event_pump.poll_iter() {
+            match event {
+                // Chip 8 related keys
+                KeyDown {
+                    keycode: Some(Keycode::Kp0),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::Zero));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::Kp1),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::Seven));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::Kp2),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::Eight));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::Kp3),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::Nine));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::Kp4),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::Four));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::Kp5),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::Five));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::Kp6),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::Six));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::Kp7),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::One));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::Kp8),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::Two));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::Kp9),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::Three));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::Q),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::A));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::W),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::B));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::E),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::C));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::R),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::D));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::D),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::E));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::F),
+                    ..
+                } => {
+                    self.keyboard.press_key(Some(Chip8Key::F));
+                }
+                KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => {
+                    self.kill_flag = true;
+                }
+                _ => {}
+            }
         }
     }
 
@@ -279,8 +397,7 @@ impl Chip8 {
                 0x33 => {
                     let mut digit = self.registers[x];
                     for i in 0..3 {
-                        let m = digit;
-                        self.memory[(self.index + 2 - i) as usize] = m % 10;
+                        self.memory[(self.index + 2 - i) as usize] = digit % 10;
                         digit /= 10;
                     }
                 }
@@ -294,7 +411,7 @@ impl Chip8 {
                     for i in 0..=x {
                         self.registers[i] = self.memory[self.index as usize + i];
                     }
-                    // self.index += 1 + x as u16;
+                    //self.index += 1 + x as u16;
                 }
                 _ => {}
             },
@@ -592,6 +709,17 @@ mod tests {
         let i: u8 = 0xFF;
         let shifted: u16 = (i as u16) << 8;
         assert_eq!(shifted, 0xFF00);
+    }
+
+    #[test]
+    fn bcd_sanity() {
+        let mut digit = 234;
+        let mut memory = [0; 3];
+        for i in 0..3 {
+            memory[2 - i] = digit % 10;
+            digit /= 10;
+        }
+        assert_eq!([2, 3, 4], memory);
     }
 
     #[test]
