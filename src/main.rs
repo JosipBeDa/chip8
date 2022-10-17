@@ -71,6 +71,7 @@ pub fn main() {
     let font = ttl_context
         .load_font(Path::new("./OpenSans-Regular.ttf"), 128)
         .unwrap();
+
     // Init chip 8 and components
     let monitor = Monitor::new_default();
     let audio_device = speaker::init_speaker(audio_subsystem);
@@ -93,7 +94,7 @@ pub fn main() {
     canvas.present();
 
     // Read the ROM and load it into chip8
-    let rom = fs::read(Path::new("./roms/Blitz.ch8")).expect("Couldn't read ROM");
+    let rom = fs::read(Path::new("./roms/Hidden.ch8")).expect("Couldn't read ROM");
     chip8.load_sprites();
     chip8.load_program(&rom);
 
@@ -104,7 +105,7 @@ pub fn main() {
         canvas.clear();
         // Cycle the chip8
         if calculate_delta(start) >= FPS_INTERVAL {
-            chip8.cycle(&mut event_pump);
+            chip8.cycle(&event_pump);
             start = Instant::now();
         }
         // Play sound
@@ -133,6 +134,7 @@ pub fn main() {
         if chip8.kill_flag {
             break;
         }
+        event_pump.poll_event();
     }
 }
 

@@ -1,35 +1,31 @@
 pub struct Keyboard {
-    pub pressed_key: Option<Chip8Key>,
+    pub pressed_key: Chip8Key,
 }
 
 impl Keyboard {
     pub fn new() -> Self {
-        Keyboard { pressed_key: None }
+        Keyboard {
+            pressed_key: Chip8Key::None,
+        }
     }
 
-    pub fn check_key(&mut self) -> Option<Chip8Key> {
-        //println!("Checking key, got: {:?}", self.pressed_key);
-        match &self.pressed_key {
-            Some(key) => {
-                let pressed_key = *key;
-                self.pressed_key = None;
-                Some(pressed_key)
-            }
-            None => None,
-        }
+    #[inline]
+    pub fn check_key(&mut self) -> Chip8Key {
+        self.pressed_key
     }
-    pub fn press_key(&mut self, key: Option<Chip8Key>) {
-        if let Some(key) = key {
-            self.pressed_key = Some(key);
+
+    #[inline]
+    pub fn press_key(&mut self, key: Chip8Key) {
+        if key != Chip8Key::None {
+            self.pressed_key = key;
         } else {
-            self.pressed_key = None;
+            self.pressed_key = Chip8Key::None;
         }
-        //println!("Pressing  key {:?}", self.pressed_key);
     }
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Chip8Key {
     Zero = 0x0,
     One = 0x1,
@@ -47,4 +43,5 @@ pub enum Chip8Key {
     D = 0xD,
     E = 0xE,
     F = 0xF,
+    None,
 }

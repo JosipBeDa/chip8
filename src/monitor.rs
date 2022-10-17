@@ -18,9 +18,10 @@ impl Monitor {
             buffer: [0; COLS * ROWS],
         }
     }
+    #[inline]
     pub fn toggle_pixel(&mut self, mut x: usize, mut y: usize) -> bool {
-        x = x % 64;
-        y = y % 32;
+        x %= 64;
+        y %= 32;
         self.buffer[x + (y * self.cols as usize)] ^= 1;
         self.buffer[x + (y * self.cols as usize)] == 0
     }
@@ -30,6 +31,7 @@ impl Monitor {
     }
 
     // Utility methods
+    #[inline]
     pub fn get_scaled_res(&self) -> (u32, u32) {
         (
             ((self.cols as usize) * SCALE) as u32,
@@ -37,6 +39,7 @@ impl Monitor {
         )
     }
 
+    #[inline]
     pub fn get_buffer(&self) -> [u8; 2048] {
         self.buffer
     }
